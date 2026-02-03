@@ -17,9 +17,13 @@ jobs:
           android-version: 13
           aosp-gcc: true
           aosp-clang: true
-          # 核心修复 1：不要指定 aosp-clang-version，避开 400 错误
-          # 核心修复 2：使用官方自带的 ksu 开关，同样能实现 SukiSU 的效果
+          # 【关键修复】删掉导致 400 错误的 aosp-clang-version 这一行
+          # 这样 Action 会自动选择适配 Android 13 的最新稳定版编译器
+          
+          # 【SukiSU 集成】使用 Action 内置的官方开关
           ksu: true
           ksu-version: main
-          # 核心修复 3：针对你的 Non-GKI 内核，直接通过编译器参数开启手动挂钩
+          
+          # 【Non-GKI 适配】由于无法使用 extra-cmd 执行 sed，
+          # 我们直接把手动挂钩的宏定义喂给编译器
           extra-make-args: CONFIG_KSU_MANUAL_HOOK=y CONFIG_OVERLAY_FS=y
