@@ -17,9 +17,9 @@ jobs:
           android-version: 13
           aosp-gcc: true
           aosp-clang: true
-          # 修复 1：删除报错的 aosp-clang-version，让系统自动选择可用版本
-          # 修复 2：启用原生 KSU 支持
+          # 核心修复 1：不要指定 aosp-clang-version，避开 400 错误
+          # 核心修复 2：使用官方自带的 ksu 开关，同样能实现 SukiSU 的效果
           ksu: true
           ksu-version: main
-          # 修复 3：针对 Non-GKI 4.14 内核，通过编译器参数开启手动挂钩
+          # 核心修复 3：针对你的 Non-GKI 内核，直接通过编译器参数开启手动挂钩
           extra-make-args: CONFIG_KSU_MANUAL_HOOK=y CONFIG_OVERLAY_FS=y
