@@ -1,25 +1,4 @@
-name: Final Manual Build Xiaomi 9 SukiSU
-on:
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Source
-        uses: actions/checkout@v4
-        with:
-          repository: alfa005pro/kernel_xiaomi_cepheus
-          ref: thirteen
-          path: kernel
-
-      - name: Set up Environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm \
-          binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
-
-      - name: SukiSU & Physical Fix
+- name: SukiSU & Physical Fix
         run: |
           cd kernel
           # 1. 注入 SukiSU
@@ -29,9 +8,11 @@ jobs:
           sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
           sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
           
-          # 3. 【核心长一智】物理删除导致报错的 scripts 文件
-          # 既然 yamltree 链接不上，我们直接清空它的内容，让它变成空函数，不链接 libyaml
-          echo "int main() { return 0; }" > scripts/dtc/yamltree.c
+          # 3. 【真正长一智】从编译脚本里彻底删掉 yaml 依赖，而不是改 C 代码
+          # 我们把 Makefile 里包含 yamltree.o 的那一行直接删掉
+          sed -i 's/dtc-objs += yamltree.o//g' scripts/dtc/Makefile
+          # 同时让 dtc.c 里的相关调用变成空（不再引用 dt_to_yaml）
+          sed -i 's/dt_to_yaml(stdout, dti);//g' scripts/dtc/dtc.c
           
           # 4. 强制配置
           cat <<EOF >> arch/arm64/configs/cepheus_defconfig
@@ -40,27 +21,3 @@ jobs:
           CONFIG_OVERLAY_FS=y
           CONFIG_VDSO32=n
           EOF
-
-      - name: Build Kernel
-        run: |
-          cd kernel
-          mkdir -p out
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          
-          make O=out ARCH=arm64 cepheus_defconfig
-          
-          # 使用系统原生工具，但避开 32 位和逻辑错误
-          make -j$(nproc --all) O=out ARCH=arm64 \
-          CC=clang \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld \
-          AR=llvm-ar \
-          NM=llvm-nm
-
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-Image
-          path: kernel/out/arch/arm64/boot/Image.gz
