@@ -1,23 +1,59 @@
-- name: SukiSU & Physical Fix
+name: Final Docker Build Xiaomi 9 SukiSU
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # 使用社区公认最稳的内核编译镜像
+    container:
+      image: althafvly/docker:latest
+    
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          repository: alfa005pro/kernel_xiaomi_cepheus
+          ref: thirteen
+          path: kernel
+
+      - name: SukiSU & Fix Config
         run: |
           cd kernel
           # 1. 注入 SukiSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # 2. 物理挂钩
+          # 2. 物理挂钩 (小米 9 Non-GKI 必需)
           sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
           sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
           
-          # 3. 【真正长一智】从编译脚本里彻底删掉 yaml 依赖，而不是改 C 代码
-          # 我们把 Makefile 里包含 yamltree.o 的那一行直接删掉
-          sed -i 's/dtc-objs += yamltree.o//g' scripts/dtc/Makefile
-          # 同时让 dtc.c 里的相关调用变成空（不再引用 dt_to_yaml）
-          sed -i 's/dt_to_yaml(stdout, dti);//g' scripts/dtc/dtc.c
-          
-          # 4. 强制配置
+          # 3. 开启 SukiSU 配置，同时禁用 VDSO32 避开兼容性地雷
           cat <<EOF >> arch/arm64/configs/cepheus_defconfig
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_OVERLAY_FS=y
           CONFIG_VDSO32=n
           EOF
+
+      - name: Build Kernel
+        run: |
+          cd kernel
+          # Docker 镜像内已经配置好了环境变量，直接开跑
+          export ARCH=arm64
+          export SUBARCH=arm64
+          make O=out ARCH=arm64 cepheus_defconfig
+          
+          # 使用容器内自带的 Clang 和交叉编译器
+          make -j$(nproc --all) O=out ARCH=arm64 \
+          CC=clang \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip
+
+      - name: Upload
+        uses: actions/upload-artifact@v
