@@ -1,34 +1,33 @@
 name: Build Xiaomi 9 SukiSU-Ultra
 on:
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-kernel:
+    name: Build Kernel
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Build Kernel
-        uses: daboy-nb/Android-Kernel-Build-Action@main
+      - name: Build
+        # 完全匹配你截图中的路径：dabao1955
+        uses: dabao1955/kernel_build_action@main
         with:
           kernel-url: https://github.com/alfa005pro/kernel_xiaomi_cepheus
           kernel-branch: thirteen
           config: cepheus_defconfig
           arch: arm64
-          aarch64-mainline: true
-          clang: true
-          # 核心集成步骤：注入 SukiSU 并打入 4.14 手动钩子
+          aosp-gcc: true
+          aosp-clang: true
+          android-version: 13
+          # 这一段是我们在 Action 基础上额外加的“核心调料”，用于集成 SukiSU
           extra-cmd: |
-            # 1. 注入 SukiSU 驱动 (使用官方一键脚本)
+            # 注入 SukiSU 代码
             curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
             
-            # 2. 针对 Non-GKI 4.14 内核手动挂钩 (Manual Hook)
-            # 这一步是为了让内核在读写和打开文件时能触发 SukiSU 的拦截
+            # 针对小米 9 (4.14/Non-GKI) 执行手动挂钩
             sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
             sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
             
-            # 3. 开启内核配置文件中的 SukiSU 选项
+            # 写入 Non-GKI 必需的内核配置
             echo "CONFIG_KSU=y" >> arch/arm64/configs/cepheus_defconfig
             echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/cepheus_defconfig
             echo "CONFIG_KPM=y" >> arch/arm64/configs/cepheus_defconfig
