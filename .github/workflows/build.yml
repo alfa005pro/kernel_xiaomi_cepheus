@@ -5,25 +5,24 @@ on:
 jobs:
   build-kernel:
     name: Build Kernel
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Build
         uses: dabao1955/kernel_build_action@main
         with:
           kernel-url: https://github.com/alfa005pro/kernel_xiaomi_cepheus
           kernel-branch: thirteen
+          # 确认使用截图 1 中的配置文件名
           config: cepheus_defconfig
           arch: arm64
           android-version: 13
           aosp-gcc: true
           aosp-clang: true
-          # 【关键修复】删掉导致 400 错误的 aosp-clang-version 这一行
-          # 这样 Action 会自动选择适配 Android 13 的最新稳定版编译器
+          # 【核心修复】删除 aosp-clang-version 这一行，让它自动选择最新可用版本，解决 400 错误
           
-          # 【SukiSU 集成】使用 Action 内置的官方开关
+          # 【SukiSU 集成】使用插件官方支持的原生开关
           ksu: true
           ksu-version: main
           
-          # 【Non-GKI 适配】由于无法使用 extra-cmd 执行 sed，
-          # 我们直接把手动挂钩的宏定义喂给编译器
+          # 【Non-GKI 适配】由于无法使用 extra-cmd，我们通过编译器参数强制开启手动挂钩
           extra-make-args: CONFIG_KSU_MANUAL_HOOK=y CONFIG_OVERLAY_FS=y
