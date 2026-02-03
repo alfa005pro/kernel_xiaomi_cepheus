@@ -1,4 +1,4 @@
-name: Manual Build Xiaomi 9 SukiSU
+name: Final Build Xiaomi 9 SukiSU
 on:
   workflow_dispatch:
 
@@ -6,43 +6,51 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Kernel Source
+      - name: Checkout Source
         uses: actions/checkout@v4
         with:
           repository: alfa005pro/kernel_xiaomi_cepheus
           ref: thirteen
           path: kernel
 
-      - name: Set up Build Environment
+      - name: Install Dependencies
         run: |
           sudo apt-get update
-          # 关键长一智：补全 libyaml-dev 以修复 DTC 编译错误
           sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm \
-          binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libyaml-dev
+          binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu libyaml-dev
 
-      - name: Integrate SukiSU
+      - name: SukiSU & Fix Config
         run: |
           cd kernel
+          # 1. 注入 SukiSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # 针对 Non-GKI 4.14 物理挂钩
+          # 2. 针对 Non-GKI 4.14 物理挂钩
           sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
           sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
           
-          # 注入配置并禁用 VDSO32 以绕过机器表示错误
-          echo "CONFIG_KSU=y" >> arch/arm64/configs/cepheus_defconfig
-          echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/cepheus_defconfig
-          echo "CONFIG_KPM=y" >> arch/arm64/configs/cepheus_defconfig
-          echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/cepheus_defconfig
-          echo "CONFIG_VDSO32=n" >> arch/arm64/configs/cepheus_defconfig
+          # 3. 核心修复：强制关掉报错的模块，开启 KSU
+          cat <<EOF >> arch/arm64/configs/cepheus_defconfig
+          CONFIG_KSU=y
+          CONFIG_KSU_MANUAL_HOOK=y
+          CONFIG_KPM=y
+          CONFIG_OVERLAY_FS=y
+          # 修复: 彻底关掉导致 ld 崩溃的 32 位 VDSO
+          CONFIG_VDSO32=n
+          CONFIG_COMPAT_VDSO=n
+          # 修复: 关掉导致 DTC 报错的 YAML 检查
+          CONFIG_DTC_YAML=n
+          EOF
 
-      - name: Start Compilation
+      - name: Build Kernel
         run: |
           cd kernel
           mkdir -p out
           export ARCH=arm64
-          # 明确指定工具链路径和链接器
+          # 这一步生成配置
           make O=out ARCH=arm64 cepheus_defconfig
+          
+          # 关键长一智：统一工具链，避免混合使用系统 ld 导致的架构错误
           make -j$(nproc --all) O=out ARCH=arm64 \
           CC=clang \
           CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -50,12 +58,12 @@ jobs:
           LD=ld.lld \
           AR=llvm-ar \
           NM=llvm-nm \
+          STRIP=llvm-strip \
           OBJCOPY=llvm-objcopy \
-          OBJDUMP=llvm-objdump \
-          STRIP=llvm-strip
+          OBJDUMP=llvm-objdump
 
-      - name: Upload Kernel Image
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-Image
+          name: Xiaomi9-SukiSU-Kernel
           path: kernel/out/arch/arm64/boot/Image.gz
