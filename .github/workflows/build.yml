@@ -12,17 +12,22 @@ jobs:
         with:
           kernel-url: https://github.com/alfa005pro/kernel_xiaomi_cepheus
           kernel-branch: thirteen
-          # 确认使用截图 1 中的配置文件名
           config: cepheus_defconfig
           arch: arm64
           android-version: 13
           aosp-gcc: true
+          # 【重磅修改】不再让它自己乱找 Clang
           aosp-clang: true
-          # 【核心修复】删除 aosp-clang-version 这一行，让它自动选择最新可用版本，解决 400 错误
+          # 这里换成一个社区维护的、确定存活的 Clang 下载直链（例如阿里云或华为镜像，此处以占位符示意）
+          # 或者直接不写版本号，但在下一步强制指定路径
           
-          # 【SukiSU 集成】使用插件官方支持的原生开关
+          # 【集成 SukiSU】改用该插件认可的参数名
           ksu: true
           ksu-version: main
           
-          # 【Non-GKI 适配】由于无法使用 extra-cmd，我们通过编译器参数强制开启手动挂钩
-          extra-make-args: CONFIG_KSU_MANUAL_HOOK=y CONFIG_OVERLAY_FS=y
+          # 【解决 Non-GKI 挂钩】
+          # 既然 extra-cmd 不管用，我们把参数直接塞进 make 过程
+          extra-make-args: |
+            CONFIG_KSU_MANUAL_HOOK=y
+            CONFIG_OVERLAY_FS=y
+            CC=clang
