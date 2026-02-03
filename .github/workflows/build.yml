@@ -16,9 +16,9 @@ jobs:
       - name: Set up Build Environment
         run: |
           sudo apt-get update
-          # 关键长一智：除了 clang，必须安装 aarch64 交叉编译工具链和链接器
+          # 关键长一智：补全 libyaml-dev 以修复 DTC 编译错误
           sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm \
-          binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libyaml-dev
 
       - name: Integrate SukiSU
         run: |
@@ -29,24 +29,30 @@ jobs:
           sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
           sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
           
-          # 注入配置
+          # 注入配置并禁用 VDSO32 以绕过机器表示错误
           echo "CONFIG_KSU=y" >> arch/arm64/configs/cepheus_defconfig
           echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/cepheus_defconfig
           echo "CONFIG_KPM=y" >> arch/arm64/configs/cepheus_defconfig
           echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/cepheus_defconfig
+          echo "CONFIG_VDSO32=n" >> arch/arm64/configs/cepheus_defconfig
 
       - name: Start Compilation
         run: |
           cd kernel
+          mkdir -p out
           export ARCH=arm64
-          export SUBARCH=arm64
-          # 使用系统自带的编译器，明确指定交叉编译器前缀
+          # 明确指定工具链路径和链接器
           make O=out ARCH=arm64 cepheus_defconfig
           make -j$(nproc --all) O=out ARCH=arm64 \
           CC=clang \
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip
 
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
