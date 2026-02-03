@@ -1,33 +1,54 @@
-name: Build Xiaomi 9 SukiSU-Ultra
+name: Manual Build Xiaomi 9 SukiSU
 on:
   workflow_dispatch:
 
 jobs:
-  build-kernel:
-    name: Build Kernel
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Build
-        uses: dabao1955/kernel_build_action@main
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
         with:
-          kernel-url: https://github.com/alfa005pro/kernel_xiaomi_cepheus
-          kernel-branch: thirteen
-          config: cepheus_defconfig
-          arch: arm64
-          android-version: 13
-          aosp-gcc: true
-          # 【重磅修改】不再让它自己乱找 Clang
-          aosp-clang: true
-          # 这里换成一个社区维护的、确定存活的 Clang 下载直链（例如阿里云或华为镜像，此处以占位符示意）
-          # 或者直接不写版本号，但在下一步强制指定路径
+          repository: alfa005pro/kernel_xiaomi_cepheus
+          ref: thirteen
+          path: kernel
+
+      - name: Set up Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm
+          # 手动下载一个确定可用的工具链 (这里使用官方 LLVM 替代失效的 AOSP Clang)
+          mkdir -p $GITHUB_WORKSPACE/toolchain
+          echo "Clang and dependencies installed via apt."
+
+      - name: Integrate SukiSU
+        run: |
+          cd kernel
+          # 1. 注入 KernelSU 核心
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # 【集成 SukiSU】改用该插件认可的参数名
-          ksu: true
-          ksu-version: main
+          # 2. 针对 4.14 Non-GKI 内核执行物理挂钩 (Manual Hook)
+          # 我们不再依赖插件的 extra-cmd，直接在这里用命令修改文件
+          sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
+          sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
           
-          # 【解决 Non-GKI 挂钩】
-          # 既然 extra-cmd 不管用，我们把参数直接塞进 make 过程
-          extra-make-args: |
-            CONFIG_KSU_MANUAL_HOOK=y
-            CONFIG_OVERLAY_FS=y
-            CC=clang
+          # 3. 将 SukiSU 配置写入 defconfig
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/cepheus_defconfig
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/cepheus_defconfig
+          echo "CONFIG_KPM=y" >> arch/arm64/configs/cepheus_defconfig
+          echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/cepheus_defconfig
+
+      - name: Start Compilation
+        run: |
+          cd kernel
+          export ARCH=arm64
+          export SUBARCH=arm64
+          # 直接使用系统自带的最新 Clang 进行编译，跳过插件的 400 错误下载步骤
+          make O=out ARCH=arm64 cepheus_defconfig
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-Image
+          path: kernel/out/arch/arm64/boot/Image.gz
