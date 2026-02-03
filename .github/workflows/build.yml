@@ -1,4 +1,4 @@
-name: Final Build Xiaomi 9 SukiSU
+name: Final Success Build Xiaomi 9 SukiSU
 on:
   workflow_dispatch:
 
@@ -16,8 +16,16 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm \
-          binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu libyaml-dev
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev libyaml-dev libssl-dev
+
+      - name: Download Proton Clang
+        run: |
+          mkdir toolchain
+          cd toolchain
+          # 下载预编译好的 Proton Clang (包含交叉编译器)
+          curl -LO https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz
+          tar -xzf master.tar.gz
+          echo "CLANG_PATH=$GITHUB_WORKSPACE/toolchain/proton-clang-master/bin" >> $GITHUB_ENV
 
       - name: SukiSU & Fix Config
         run: |
@@ -25,42 +33,38 @@ jobs:
           # 1. 注入 SukiSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # 2. 针对 Non-GKI 4.14 物理挂钩
+          # 2. 针对 4.14 Non-GKI 物理挂钩
           sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
           sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
           
-          # 3. 核心修复：强制关掉报错的模块，开启 KSU
+          # 3. 强制写入配置，绕过 DTC_YAML 和 VDSO32 坑
           cat <<EOF >> arch/arm64/configs/cepheus_defconfig
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
-          CONFIG_KPM=y
           CONFIG_OVERLAY_FS=y
-          # 修复: 彻底关掉导致 ld 崩溃的 32 位 VDSO
           CONFIG_VDSO32=n
-          CONFIG_COMPAT_VDSO=n
-          # 修复: 关掉导致 DTC 报错的 YAML 检查
           CONFIG_DTC_YAML=n
           EOF
 
       - name: Build Kernel
         run: |
           cd kernel
-          mkdir -p out
+          export PATH="${{ env.CLANG_PATH }}:$PATH"
           export ARCH=arm64
-          # 这一步生成配置
+          export SUBARCH=arm64
+          
           make O=out ARCH=arm64 cepheus_defconfig
           
-          # 关键长一智：统一工具链，避免混合使用系统 ld 导致的架构错误
-          make -j$(nproc --all) O=out ARCH=arm64 \
-          CC=clang \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          LD=ld.lld \
-          AR=llvm-ar \
-          NM=llvm-nm \
-          STRIP=llvm-strip \
-          OBJCOPY=llvm-objcopy \
-          OBJDUMP=llvm-objdump
+          # 使用 Proton Clang 完整全家桶，避开系统链接器
+          make -j$(nproc --all) O=out \
+              ARCH=arm64 \
+              CC=clang \
+              CROSS_COMPILE=aarch64-linux-gnu- \
+              CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+              NM=llvm-nm \
+              OBJCOPY=llvm-objcopy \
+              OBJDUMP=llvm-objdump \
+              STRIP=llvm-strip
 
       - name: Upload
         uses: actions/upload-artifact@v4
