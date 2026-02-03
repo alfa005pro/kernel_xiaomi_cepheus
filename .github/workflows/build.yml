@@ -1,4 +1,4 @@
-name: Final Success Build Xiaomi 9 SukiSU
+name: Final Manual Build Xiaomi 9 SukiSU
 on:
   workflow_dispatch:
 
@@ -13,61 +13,54 @@ jobs:
           ref: thirteen
           path: kernel
 
-      - name: Install Dependencies
+      - name: Set up Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev libyaml-dev libssl-dev
+          sudo apt-get install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm \
+          binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
 
-      - name: Download Proton Clang
-        run: |
-          mkdir toolchain
-          cd toolchain
-          # 下载预编译好的 Proton Clang (包含交叉编译器)
-          curl -LO https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz
-          tar -xzf master.tar.gz
-          echo "CLANG_PATH=$GITHUB_WORKSPACE/toolchain/proton-clang-master/bin" >> $GITHUB_ENV
-
-      - name: SukiSU & Fix Config
+      - name: SukiSU & Physical Fix
         run: |
           cd kernel
           # 1. 注入 SukiSU
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           
-          # 2. 针对 4.14 Non-GKI 物理挂钩
+          # 2. 物理挂钩
           sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
           sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
           
-          # 3. 强制写入配置，绕过 DTC_YAML 和 VDSO32 坑
+          # 3. 【核心长一智】物理删除导致报错的 scripts 文件
+          # 既然 yamltree 链接不上，我们直接清空它的内容，让它变成空函数，不链接 libyaml
+          echo "int main() { return 0; }" > scripts/dtc/yamltree.c
+          
+          # 4. 强制配置
           cat <<EOF >> arch/arm64/configs/cepheus_defconfig
           CONFIG_KSU=y
           CONFIG_KSU_MANUAL_HOOK=y
           CONFIG_OVERLAY_FS=y
           CONFIG_VDSO32=n
-          CONFIG_DTC_YAML=n
           EOF
 
       - name: Build Kernel
         run: |
           cd kernel
-          export PATH="${{ env.CLANG_PATH }}:$PATH"
+          mkdir -p out
           export ARCH=arm64
-          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
           
           make O=out ARCH=arm64 cepheus_defconfig
           
-          # 使用 Proton Clang 完整全家桶，避开系统链接器
-          make -j$(nproc --all) O=out \
-              ARCH=arm64 \
-              CC=clang \
-              CROSS_COMPILE=aarch64-linux-gnu- \
-              CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-              NM=llvm-nm \
-              OBJCOPY=llvm-objcopy \
-              OBJDUMP=llvm-objdump \
-              STRIP=llvm-strip
+          # 使用系统原生工具，但避开 32 位和逻辑错误
+          make -j$(nproc --all) O=out ARCH=arm64 \
+          CC=clang \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Xiaomi9-SukiSU-Kernel
+          name: kernel-Image
           path: kernel/out/arch/arm64/boot/Image.gz
