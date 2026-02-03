@@ -1,37 +1,35 @@
-# This is a basic workflow to help you get started with Actions
-name: build
-
-# Controls when the action will run.
+name: Build Xiaomi 9 SukiSU-Ultra
 on:
-  # Triggers the workflow on push events but only for the eleven branch
-  push:
-    tags:
-      - "*"
+  workflow_dispatch: # 手动触发
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - name: Build
-        run: |
-          bash ./build.sh
-
-      - name: Release
-        uses: "marvinpinto/action-automatic-releases@latest"
+      - name: Build Kernel
+        uses: daboy-nb/Android-Kernel-Build-Action@main
         with:
-          automatic_release_tag: "latest"
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          prerelease: false
-          files: |
-            out/*.zip
+          kernel-url: https://github.com/alfa005pro/kernel_xiaomi_cepheus
+          kernel-branch: thirteen
+          config: cepheus_defconfig
+          arch: arm64
+          aarch64-mainline: true
+          clang: true
+          # 核心集成步骤：注入 SukiSU 并打入 4.14 手动钩子
+          extra-cmd: |
+            # 1. 注入 SukiSU 驱动 (使用官方一键脚本)
+            curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+            
+            # 2. 针对 Non-GKI 4.14 内核手动挂钩 (Manual Hook)
+            # 这一步是为了让内核在读写和打开文件时能触发 SukiSU 的拦截
+            sed -i '/ssize_t vfs_read(struct file/a \    extern int ksu_handle_read(struct file *, char __user *, size_t *, loff_t *);\n    ksu_handle_read(file, buf, &count, pos);' fs/read_write.c
+            sed -i '/ssize_t vfs_write(struct file/a \    extern int ksu_handle_write(struct file *, const char __user *, size_t *, loff_t *);\n    ksu_handle_write(file, buf, &count, pos);' fs/read_write.c
+            
+            # 3. 开启内核配置文件中的 SukiSU 选项
+            echo "CONFIG_KSU=y" >> arch/arm64/configs/cepheus_defconfig
+            echo "CONFIG_KSU_MANUAL_HOOK=y" >> arch/arm64/configs/cepheus_defconfig
+            echo "CONFIG_KPM=y" >> arch/arm64/configs/cepheus_defconfig
+            echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/cepheus_defconfig
