@@ -4,6 +4,7 @@
 hostprogs-y	:= dtc
 always		:= $(hostprogs-y)
 
+# 核心修改：确保这里绝对没有 yamltree.o
 dtc-objs	:= dtc.o flattree.o fstree.o data.o livetree.o treesource.o \
 		   srcpos.o checks.o util.o
 dtc-objs	+= dtc-lexer.lex.o dtc-parser.tab.o
@@ -11,12 +12,16 @@ dtc-objs	+= dtc-lexer.lex.o dtc-parser.tab.o
 # Source files need to get at the userspace version of libfdt_env.h to compile
 HOST_EXTRACFLAGS := -I$(src)/libfdt
 
-ifeq ($(shell pkg-config --exists yaml-0.1 2>/dev/null && echo yes),)
+# 这里我们强制开启 -DNO_YAML，并删掉所有关于 yamltree.o 的判断逻辑
 HOST_EXTRACFLAGS += -DNO_YAML
-else
-dtc-objs	+= yamltree.o
-HOSTLDLIBS_dtc	:= $(shell pkg-config yaml-0.1 --libs)
-endif
+
+# 注释掉下面这段会引起误判的逻辑
+# ifeq ($(shell pkg-config --exists yaml-0.1 2>/dev/null && echo yes),)
+# HOST_EXTRACFLAGS += -DNO_YAML
+# else
+# dtc-objs	+= yamltree.o
+# HOSTLDLIBS_dtc	:= $(shell pkg-config yaml-0.1 --libs)
+# endif
 
 # Generated files need one more search path to include headers in source tree
 HOSTCFLAGS_dtc-lexer.lex.o := -I$(src)
